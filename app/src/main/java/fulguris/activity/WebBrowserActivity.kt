@@ -224,10 +224,12 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     lateinit var portraitSharedPrefs: SharedPreferences
     @Inject @PrefsLandscape
     lateinit var landscapeSharedPrefs: SharedPreferences
-    // Need to keep reference of listener otherwise they get carbadge collected
-    private lateinit var portraitPrefsListener: SharedPreferences.OnSharedPreferenceChangeListener
-    private lateinit var landscapePrefsListener: SharedPreferences.OnSharedPreferenceChangeListener
-
+    // Need to keep reference of listener otherwise they get garbage collected
+    // Used to apply changes live when configuration preferences are adjusted from options settings
+    private val configPrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { sharedPreferences, key ->
+        Timber.d("Config prefs changed")
+        updateConfiguration()
+    }
 
     // HTTP
     private lateinit var queue: RequestQueue
@@ -299,6 +301,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         Timber.v("onCreate")
         // Need to go first to inject our components
         super.onCreate(savedInstanceState)
+        //
+        updateConfigurationSharedPreferences()
         // We want to control our decor
         WindowCompat.setDecorFitsSystemWindows(window,false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -460,22 +464,19 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         // Hook in buttons with onClick handler
         iBindingToolbarContent.buttonReload.setOnClickListener(this)
 
+    }
 
-        portraitPrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { sharedPreferences, key ->
-            Timber.d("Portrait prefs changed")
-            if (isPortrait) {
-                updateConfiguration()
-            }
-        }
-        portraitSharedPrefs.registerOnSharedPreferenceChangeListener(portraitPrefsListener)
-
-        landscapePrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { sharedPreferences, key ->
-            Timber.d("Landscape prefs changed")
-            if (isLandscape) {
-                updateConfiguration()
-            }
-        }
-        landscapeSharedPrefs.registerOnSharedPreferenceChangeListener(landscapePrefsListener)
+    /**
+     * Call this whenever our configuration could have changed.
+     * It takes care of setting our global configPrefs and make sure we are listening to changes.
+     */
+    private fun updateConfigurationSharedPreferences() {
+        //
+        updateConfigPrefs()
+        // I reckon that should prevent accumulating listeners
+        // Single unneeded notifications should not impact performance and functionality
+        configPrefs.preferences.unregisterOnSharedPreferenceChangeListener(configPrefsListener)
+        configPrefs.preferences.registerOnSharedPreferenceChangeListener(configPrefsListener)
     }
 
     /**
@@ -3260,11 +3261,12 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
      * See: [Activity.onConfigurationChanged]
      */
     override fun onConfigurationChanged(aNewConfig: Configuration) {
+        Timber.d("onConfigurationChanged - $configId")
+        updateConfigurationSharedPreferences()
+
         super.onConfigurationChanged(aNewConfig)
 
-        Timber.d("onConfigurationChanged")
-
-        updateConfiguration(aNewConfig)
+        updateConfiguration()
 
         iMenuMain.dismiss() // As it wont update somehow
         iMenuWebPage.dismiss()
@@ -3418,8 +3420,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         iPlaceHolder = null
 
         // Defensive, should not even be needed
-        portraitSharedPrefs.unregisterOnSharedPreferenceChangeListener(portraitPrefsListener)
-        landscapeSharedPrefs.unregisterOnSharedPreferenceChangeListener(landscapePrefsListener)
+        //portraitSharedPrefs.unregisterOnSharedPreferenceChangeListener(portraitPrefsListener)
+        //landscapeSharedPrefs.unregisterOnSharedPreferenceChangeListener(landscapePrefsListener)
         //
         queue.cancelAll(TAG)
 
@@ -3454,6 +3456,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
      *
      */
     override fun onResume() {
+        updateConfigurationSharedPreferences()
         super.onResume()
         Timber.d("onResume")
         // Check if some settings changes require application restart
